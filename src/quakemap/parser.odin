@@ -11,6 +11,7 @@ read :: proc(
 	return
 }
 
+@(private)
 read_entity :: proc(
 	lines: []string,
 	line_idx: ^int,
@@ -22,10 +23,12 @@ read_entity :: proc(
 	return
 }
 
+@(private)
 read_property :: proc(line: string) -> (prop: Property, err: ParseError) {
 	return
 }
 
+@(private)
 read_solid :: proc(
 	lines: []string,
 	line_idx: ^int,
@@ -37,10 +40,12 @@ read_solid :: proc(
 	return
 }
 
+@(private)
 read_face :: proc(line: string) -> (face: Face, err: ParseError) {
 	return
 }
 
+@(private)
 read_point :: proc(tokens: []string) -> (point: Vec3d, err: ParseError) {
 	return
 }

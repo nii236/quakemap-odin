@@ -14,6 +14,7 @@ find_floor_height :: proc(
 ) {
 	return 0, false
 }
+@(private)
 build_collision_data :: proc(
 	quake_map: ^QuakeMap,
 	allocator := context.allocator,

@@ -1,5 +1,6 @@
 package quakemap
 
+@(private)
 build_world_meshes :: proc(
 	quake_map: ^QuakeMap,
 	materials: ^map[string]MaterialInfo,
@@ -8,6 +9,7 @@ build_world_meshes :: proc(
 	return {}
 }
 
+@(private)
 build_entity_meshes :: proc(
 	quake_map: ^QuakeMap,
 	materials: ^map[string]MaterialInfo,
