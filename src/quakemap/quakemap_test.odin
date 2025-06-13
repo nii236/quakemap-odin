@@ -30,6 +30,7 @@ test_quakemap_read :: proc(t: ^testing.T) {
 
 
 	quake_map, err := read(test_map_file)
+	defer quake_map_destroy(&quake_map)
 	testing.expect_value(t, err, ParseError.None)
 
 	// Check to see if we have a world

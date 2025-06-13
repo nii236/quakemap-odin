@@ -59,6 +59,39 @@ load_map_from_string :: proc(loader: ^MapLoader, data: string) -> (LoadedMap, Pa
 	return loaded_map, .None
 }
 
+quake_map_destroy :: proc(quake_map: ^QuakeMap) {
+	// Clean up worldspawn entity
+	destroy_entity(&quake_map.worldspawn)
+
+	// Clean up all other entities
+	for &entity in quake_map.entities {
+		destroy_entity(&entity)
+	}
+	delete(quake_map.entities)
+}
+
+@(private)
+destroy_entity :: proc(entity: ^Entity) {
+	// Free classname string
+	delete(entity.classname)
+
+	// Free all property key-value pairs
+	for prop in entity.properties {
+		delete(prop.key)
+		delete(prop.value)
+	}
+	delete(entity.properties)
+
+	// Free all solids
+	for &solid in entity.solids {
+		for &face in solid.faces {
+			delete(face.vertices)
+		}
+		delete(solid.faces)
+	}
+	delete(entity.solids)
+}
+
 map_destroy :: proc(quake_map: ^LoadedMap) {
 	// Clean up meshes
 	for mesh in quake_map.world_geometry {
