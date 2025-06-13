@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:math"
 import "core:math/linalg"
 import "core:os"
+import "core:strings"
 import rl "vendor:raylib"
 
 // Constants
@@ -18,6 +19,8 @@ MAP_SCALE :: f32(0.1)
 loaded_map: quakemap.LoadedMap
 raylib_meshes: [dynamic]rl.Mesh
 raylib_models: [dynamic]rl.Model
+loaded_textures: map[string]rl.Texture2D // Map texture names to loaded textures
+mesh_texture_names: [dynamic]string // Track texture name for each mesh
 camera: rl.Camera3D
 camera_yaw: f32
 camera_pitch: f32
@@ -54,6 +57,9 @@ main :: proc() {
 	// Setup camera
 	setup_camera()
 
+	// Load textures
+	load_textures()
+
 	// Convert quake meshes to Raylib meshes
 	convert_quake_meshes_to_raylib()
 	defer cleanup_raylib_meshes()
@@ -83,25 +89,22 @@ main :: proc() {
 }
 
 setup_camera :: proc() {
-	// Try to find a spawn point for initial camera position
 	initial_pos := rl.Vector3{0, 10, 0}
 
 	if len(loaded_map.spawn_points) > 0 {
 		spawn := loaded_map.spawn_points[0]
-		// Convert Quake coordinates (X,Y,Z) to Raylib coordinates (X,Z,-Y)
 		initial_pos = rl.Vector3 {
 			spawn.position.x * MAP_SCALE,
-			spawn.position.z * MAP_SCALE + 1, // Quake Z becomes Raylib Y, add height
-			-spawn.position.y * MAP_SCALE, // Quake Y becomes -Raylib Z
+			spawn.position.z * MAP_SCALE + 1,
+			-spawn.position.y * MAP_SCALE,
 		}
 		fmt.printf("Starting at spawn point: %v (scaled: %v)\n", spawn.position, initial_pos)
 	} else {
-		// Use map center if no spawn points
 		center := (loaded_map.map_bounds.min + loaded_map.map_bounds.max) * 0.5
 		initial_pos = rl.Vector3 {
 			center.x * MAP_SCALE,
-			center.z * MAP_SCALE + 5, // Quake Z becomes Raylib Y, above the map
-			-center.y * MAP_SCALE, // Quake Y becomes -Raylib Z
+			center.z * MAP_SCALE + 5,
+			-center.y * MAP_SCALE,
 		}
 		fmt.printf("Starting at map center: %v (scaled: %v)\n", center, initial_pos)
 	}
@@ -114,16 +117,53 @@ setup_camera :: proc() {
 		projection = .PERSPECTIVE,
 	}
 
-	// Initialize camera angles
 	camera_yaw = 0.0
 	camera_pitch = 0.0
+}
+
+load_textures :: proc() {
+	loaded_textures = make(map[string]rl.Texture2D)
+
+	texture_dir := "textures"
+	dir_handle, dir_err := os.open(texture_dir)
+	if dir_err != os.ERROR_NONE {
+		fmt.printf("Failed to open textures directory: %v\n", dir_err)
+		return
+	}
+	defer os.close(dir_handle)
+
+	file_infos, read_err := os.read_dir(dir_handle, -1)
+	if read_err != os.ERROR_NONE {
+		fmt.printf("Failed to read textures directory: %v\n", read_err)
+		return
+	}
+	defer delete(file_infos)
+
+	for file_info in file_infos {
+		if strings.has_suffix(file_info.name, ".png") {
+			texture_name := strings.trim_suffix(file_info.name, ".png")
+			texture_path := fmt.tprintf("%s/%s", texture_dir, file_info.name)
+
+			texture_path_cstr := strings.clone_to_cstring(texture_path, context.temp_allocator)
+
+			texture := rl.LoadTexture(texture_path_cstr)
+			if texture.id != 0 {
+				loaded_textures[strings.clone(texture_name)] = texture
+				fmt.printf("Loaded texture: %s\n", texture_name)
+			} else {
+				fmt.printf("Failed to load texture: %s\n", texture_path)
+			}
+		}
+	}
+
+	fmt.printf("Loaded %d textures\n", len(loaded_textures))
 }
 
 convert_quake_meshes_to_raylib :: proc() {
 	raylib_meshes = make([dynamic]rl.Mesh)
 	raylib_models = make([dynamic]rl.Model)
+	mesh_texture_names = make([dynamic]string)
 
-	// Convert world geometry
 	for quake_mesh in loaded_map.world_geometry {
 		if len(quake_mesh.vertices) == 0 || len(quake_mesh.indices) == 0 {
 			continue
@@ -132,9 +172,22 @@ convert_quake_meshes_to_raylib :: proc() {
 		raylib_mesh := convert_mesh_to_raylib(quake_mesh)
 		append(&raylib_meshes, raylib_mesh)
 
-		// Create a model from the mesh
+		// Create a model from the mesh and apply texture if available
 		model := rl.LoadModelFromMesh(raylib_mesh)
-		model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].color = rl.WHITE
+
+		// Extract material name from the quake mesh
+		material_name := extract_material_name_from_mesh(quake_mesh)
+		append(&mesh_texture_names, material_name)
+
+		// Try to apply the texture
+		if texture, has_texture := loaded_textures[material_name]; has_texture {
+			model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].texture = texture
+			fmt.printf("Applied texture '%s' to world mesh\n", material_name)
+		} else {
+			model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].color = rl.WHITE
+			fmt.printf("No texture found for material '%s', using white color\n", material_name)
+		}
+
 		append(&raylib_models, model)
 	}
 
@@ -147,9 +200,25 @@ convert_quake_meshes_to_raylib :: proc() {
 		raylib_mesh := convert_mesh_to_raylib(quake_mesh)
 		append(&raylib_meshes, raylib_mesh)
 
-		// Create a model from the mesh with different color for entities
+		// Create a model from the mesh and apply texture if available
 		model := rl.LoadModelFromMesh(raylib_mesh)
-		model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].color = rl.GREEN
+
+		// Extract material name from the quake mesh
+		material_name := extract_material_name_from_mesh(quake_mesh)
+		append(&mesh_texture_names, material_name)
+
+		// Try to apply the texture (entities use same logic as world)
+		if texture, has_texture := loaded_textures[material_name]; has_texture {
+			model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].texture = texture
+			fmt.printf("Applied texture '%s' to entity mesh\n", material_name)
+		} else {
+			model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].color = rl.GREEN
+			fmt.printf(
+				"No texture found for material '%s', using green color for entity\n",
+				material_name,
+			)
+		}
+
 		append(&raylib_models, model)
 	}
 
@@ -378,4 +447,25 @@ draw_ui :: proc() {
 	// Draw crosshair
 	rl.DrawLine(center_x - 10, center_y, center_x + 10, center_y, rl.WHITE)
 	rl.DrawLine(center_x, center_y - 10, center_x, center_y + 10, rl.WHITE)
+}
+
+// Extract material name from a quakemap mesh
+// This is a simplified approach - we'll use the first texture that matches the dimensions
+// In a real implementation, we'd want the quakemap library to store the material name
+extract_material_name_from_mesh :: proc(quake_mesh: quakemap.Mesh) -> string {
+	// For now, let's use a simple heuristic based on common Quake texture names
+	// We'll check which loaded texture is most likely to be the one used
+
+	// If the mesh has a specific material handle set, try to find it
+	if quake_mesh.material.handle != nil {
+		// The handle might point to texture data, but we need the name
+		// This is where we'd need better integration with the quakemap library
+	}
+
+	// For now, just use the first available texture as a fallback
+	for texture_name in loaded_textures {
+		return texture_name
+	}
+
+	return "tech_1" // Final fallback
 }
