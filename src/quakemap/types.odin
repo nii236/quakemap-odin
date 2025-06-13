@@ -74,12 +74,12 @@ BoundingBox :: struct {
 }
 
 CollisionData :: struct {
-	solids:       []CollisionSolid,
+	solids:       [dynamic]CollisionSolid,
 	spatial_grid: SpatialGrid,
 }
 
 CollisionSolid :: struct {
-	faces:  []CollisionFace,
+	faces:  [dynamic]CollisionFace,
 	bounds: BoundingBox,
 }
 
@@ -117,12 +117,12 @@ Face :: struct {
 	rotation:     f32,
 	scale_x:      f32,
 	scale_y:      f32,
-	vertices:     []Vec3d,
+	vertices:     []Vec3,
 }
 
 Plane :: struct {
-	normal: Vec3d,
-	d:      f64,
+	normal: Vec3,
+	d:      f32,
 }
 
 Solid :: struct {
