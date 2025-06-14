@@ -30,6 +30,7 @@ test_quakemap_read :: proc(t: ^testing.T) {
 
 
 	quake_map, err := read(test_map_file)
+	defer quake_map_destroy(&quake_map)
 	testing.expect_value(t, err, ParseError.None)
 
 	// Check to see if we have a world
@@ -52,32 +53,16 @@ test_quakemap_read :: proc(t: ^testing.T) {
 	testing.expect_value(t, first_face.scale_x, 1.0)
 	testing.expect_value(t, first_face.scale_y, 1.0)
 
-	// Test vertex positions (converted from f64 to f32 for comparison)
+	// Test vertex positions (vertices are now already Vec3)
 	expected_v0 := Vec3{256, 0, 0}
 	expected_v1 := Vec3{256, 0, -64}
 	expected_v2 := Vec3{256, 256, -64}
 	expected_v3 := Vec3{256, 256, 0}
 
-	actual_v0 := Vec3 {
-		f32(first_face.vertices[0].x),
-		f32(first_face.vertices[0].y),
-		f32(first_face.vertices[0].z),
-	}
-	actual_v1 := Vec3 {
-		f32(first_face.vertices[1].x),
-		f32(first_face.vertices[1].y),
-		f32(first_face.vertices[1].z),
-	}
-	actual_v2 := Vec3 {
-		f32(first_face.vertices[2].x),
-		f32(first_face.vertices[2].y),
-		f32(first_face.vertices[2].z),
-	}
-	actual_v3 := Vec3 {
-		f32(first_face.vertices[3].x),
-		f32(first_face.vertices[3].y),
-		f32(first_face.vertices[3].z),
-	}
+	actual_v0 := first_face.vertices[0]
+	actual_v1 := first_face.vertices[1]
+	actual_v2 := first_face.vertices[2]
+	actual_v3 := first_face.vertices[3]
 
 	testing.expect_value(t, actual_v0, expected_v0)
 	testing.expect_value(t, actual_v1, expected_v1)
@@ -109,7 +94,7 @@ test_quakemap_read :: proc(t: ^testing.T) {
 	}
 }
 
-// Helper procedures for entity property access (these would be implemented in entity.odin)
+// Helper procedures for entity property access
 get_string_property :: proc(entity: Entity, key: string) -> Maybe(string) {
 	for prop in entity.properties {
 		if prop.key == key {
@@ -120,11 +105,18 @@ get_string_property :: proc(entity: Entity, key: string) -> Maybe(string) {
 }
 
 get_float_property :: proc(entity: Entity, key: string) -> Maybe(f32) {
-	// Implementation would parse string to float
-	return nil
+	str_val, ok := entity_get_string(entity, key)
+	if !ok do return nil
+
+	val, parse_ok := entity_get_float(entity, key)
+	if !parse_ok do return nil
+
+	return val
 }
 
 get_vec3_property :: proc(entity: Entity, key: string) -> Maybe(Vec3) {
-	// Implementation would parse string to Vec3
-	return nil
+	val, ok := entity_get_vec3(entity, key)
+	if !ok do return nil
+
+	return val
 }
