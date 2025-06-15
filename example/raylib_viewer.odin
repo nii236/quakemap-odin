@@ -241,6 +241,7 @@ convert_quake_meshes_to_raylib :: proc() {
 			fmt.printf("Skipping mesh due to conversion error: %v\n", err)
 			continue
 		}
+		rl.UploadMesh(&raylib_mesh, false)
 		append(&raylib_meshes, raylib_mesh)
 
 		model := rl.LoadModelFromMesh(raylib_mesh)
@@ -273,6 +274,7 @@ convert_quake_meshes_to_raylib :: proc() {
 			fmt.printf("Skipping mesh due to conversion error: %v\n", err)
 			continue
 		}
+		rl.UploadMesh(&raylib_mesh, false)
 		append(&raylib_meshes, raylib_mesh)
 
 		model := rl.LoadModelFromMesh(raylib_mesh)
@@ -367,8 +369,6 @@ convert_mesh_to_raylib :: proc(quake_mesh: quakemap.Mesh) -> (rl.Mesh, ConvertMe
 		indices_slice[i] = u16(index)
 	}
 
-	// Upload mesh data to GPU
-	rl.UploadMesh(&mesh, false)
 	return mesh, .None
 }
 
