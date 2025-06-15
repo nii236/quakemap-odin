@@ -65,7 +65,10 @@ main :: proc() {
 	setup_camera()
 
 	// Convert quake meshes to Raylib meshes
-	convert_quake_meshes_to_raylib()
+	if err := convert_quake_meshes_to_raylib(); err != .None {
+		fmt.printf("Error converting quake meshes to Raylib: %v\n", err)
+		os.exit(1)
+	}
 	defer cleanup_raylib_meshes()
 
 	fmt.println("Starting render loop...")
@@ -226,11 +229,15 @@ populate_loader_materials :: proc(loader: ^quakemap.MapLoader) {
 	}
 }
 
-convert_quake_meshes_to_raylib :: proc() {
+ConvertMeshesError :: enum {
+	None,
+	MeshConversionFailed,
+}
+
+convert_quake_meshes_to_raylib :: proc() -> ConvertMeshesError {
 	raylib_meshes = make([dynamic]rl.Mesh)
 	raylib_models = make([dynamic]rl.Model)
 
-	// Use the pre-sorted texture names for consistent lookup
 	texture_list := make([dynamic]rl.Texture2D, 0, len(sorted_texture_names))
 	for name in sorted_texture_names {
 		texture := loaded_textures[name]
@@ -238,13 +245,14 @@ convert_quake_meshes_to_raylib :: proc() {
 	}
 	defer delete(texture_list)
 
-	// Fallback texture if material not found
 	fallback_texture: rl.Texture2D
 	fallback_texture_set := false
 	if len(texture_list) > 0 {
 		fallback_texture = texture_list[0]
 		fallback_texture_set = true
 	}
+
+	any_failed := false
 
 	// Convert world geometry
 	for quake_mesh in loaded_map.world_geometry {
@@ -255,6 +263,7 @@ convert_quake_meshes_to_raylib :: proc() {
 		raylib_mesh, err := convert_mesh_to_raylib(quake_mesh)
 		if err != .None {
 			fmt.printf("Skipping mesh due to conversion error: %v\n", err)
+			any_failed = true
 			continue
 		}
 		rl.UploadMesh(&raylib_mesh, false)
@@ -288,6 +297,7 @@ convert_quake_meshes_to_raylib :: proc() {
 		raylib_mesh, err := convert_mesh_to_raylib(quake_mesh)
 		if err != .None {
 			fmt.printf("Skipping mesh due to conversion error: %v\n", err)
+			any_failed = true
 			continue
 		}
 		rl.UploadMesh(&raylib_mesh, false)
@@ -311,6 +321,11 @@ convert_quake_meshes_to_raylib :: proc() {
 
 		append(&raylib_models, model)
 	}
+
+	if any_failed {
+		return .MeshConversionFailed
+	}
+	return .None
 }
 
 ConvertMeshError :: enum {
