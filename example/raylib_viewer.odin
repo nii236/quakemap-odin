@@ -470,64 +470,6 @@ draw_map :: proc() {
 	}
 }
 
-draw_collision_wireframes :: proc() {
-	// Draw collision data as wireframes (scaled and coordinate-converted)
-	for solid in loaded_map.collision_data.solids {
-		for face in solid.faces {
-			if len(face.vertices) < 3 {
-				continue
-			}
-
-			// Draw face as lines (scaled and coordinate-converted)
-			for i in 0 ..< len(face.vertices) {
-				start := face.vertices[i]
-				end := face.vertices[(i + 1) % len(face.vertices)]
-
-				// Convert Quake (X,Y,Z) to Raylib (X,Z,-Y)
-				rl_start := rl.Vector3 {
-					start.x * MAP_SCALE,
-					start.z * MAP_SCALE,
-					-start.y * MAP_SCALE,
-				}
-				rl_end := rl.Vector3{end.x * MAP_SCALE, end.z * MAP_SCALE, -end.y * MAP_SCALE}
-
-				rl.DrawLine3D(rl_start, rl_end, rl.RED)
-			}
-		}
-	}
-}
-
-draw_spawn_points :: proc() {
-	for spawn_point in loaded_map.spawn_points {
-		// Convert Quake coordinates (X,Y,Z) to Raylib coordinates (X,Z,-Y)
-		pos := rl.Vector3 {
-			spawn_point.position.x * MAP_SCALE,
-			spawn_point.position.z * MAP_SCALE, // Quake Z becomes Raylib Y
-			-spawn_point.position.y * MAP_SCALE, // Quake Y becomes -Raylib Z
-		}
-
-		// Draw spawn point as a cube (scaled appropriately)
-		cube_size := f32(2.0) * MAP_SCALE
-		rl.DrawCube(pos, cube_size, cube_size, cube_size, rl.YELLOW)
-		rl.DrawCubeWires(pos, cube_size, cube_size, cube_size, rl.BLACK)
-
-		// Draw direction indicator (simple arrow, scaled)
-		// Note: Quake rotation might need conversion too, but for now use as-is
-		forward := rl.Vector3 {
-			math.cos(spawn_point.rotation.y),
-			0,
-			-math.sin(spawn_point.rotation.y), // Adjust for coordinate system
-		}
-		arrow_length := f32(3.0) * MAP_SCALE
-		arrow_end := rl.Vector3 {
-			pos.x + forward.x * arrow_length,
-			pos.y,
-			pos.z + forward.z * arrow_length,
-		}
-		rl.DrawLine3D(pos, arrow_end, rl.BLUE)
-	}
-}
-
 draw_ui :: proc() {
 	// Just a simple crosshair for game-like feel
 	center_x := i32(SCREEN_WIDTH / 2)
