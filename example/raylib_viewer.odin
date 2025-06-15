@@ -28,11 +28,15 @@ noclip_mode: bool = false
 main :: proc() {
 	fmt.println("=== Raylib Quake Map Viewer ===")
 
+	// Initialize Raylib FIRST
+	rl.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Quake Map Viewer")
+	defer rl.CloseWindow()
+
 	// Initialize the map loader
 	loader := quakemap.loader_init("textures/")
 	defer quakemap.loader_destroy(&loader)
 
-	// Load textures first and populate the loader's materials map
+	// Load textures after Raylib is initialized
 	load_textures()
 	populate_loader_materials(&loader)
 
@@ -49,10 +53,6 @@ main :: proc() {
 	defer quakemap.map_destroy(&loaded_map)
 
 	fmt.println("Map loaded successfully!")
-
-	// Initialize Raylib
-	rl.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Quake Map Viewer")
-	defer rl.CloseWindow()
 
 	rl.SetTargetFPS(60)
 	rl.DisableCursor()
@@ -126,16 +126,19 @@ setup_camera :: proc() {
 }
 
 load_textures :: proc() {
+	fmt.println("DEBUG: Starting load_textures")
 	loaded_textures = make(map[string]rl.Texture2D)
 	
 	// Load all texture files from textures directory
 	texture_dir := "textures"
+	fmt.printf("DEBUG: Opening texture directory: %s\n", texture_dir)
 	dir_handle, dir_err := os.open(texture_dir)
 	if dir_err != os.ERROR_NONE {
 		fmt.printf("Failed to open textures directory: %v\n", dir_err)
 		return
 	}
 	defer os.close(dir_handle)
+	fmt.println("DEBUG: Directory opened successfully")
 	
 	file_infos, read_err := os.read_dir(dir_handle, -1)
 	if read_err != os.ERROR_NONE {
@@ -143,16 +146,21 @@ load_textures :: proc() {
 		return
 	}
 	defer delete(file_infos)
+	fmt.printf("DEBUG: Found %d files in directory\n", len(file_infos))
 	
 	for file_info in file_infos {
+		fmt.printf("DEBUG: Processing file: %s\n", file_info.name)
 		if strings.has_suffix(file_info.name, ".png") {
 			texture_name := strings.trim_suffix(file_info.name, ".png")
 			texture_path := fmt.tprintf("%s/%s", texture_dir, file_info.name)
+			fmt.printf("DEBUG: Loading texture: %s from %s\n", texture_name, texture_path)
 			
 			// Convert to cstring for raylib
 			texture_path_cstr := strings.clone_to_cstring(texture_path, context.temp_allocator)
+			fmt.printf("DEBUG: About to call rl.LoadTexture\n")
 			
 			texture := rl.LoadTexture(texture_path_cstr)
+			fmt.printf("DEBUG: rl.LoadTexture returned, texture.id = %d\n", texture.id)
 			if texture.id != 0 {
 				loaded_textures[strings.clone(texture_name)] = texture
 				fmt.printf("Loaded texture: %s\n", texture_name)
@@ -181,6 +189,25 @@ populate_loader_materials :: proc(loader: ^quakemap.MapLoader) {
 convert_quake_meshes_to_raylib :: proc() {
 	raylib_meshes = make([dynamic]rl.Mesh)
 	raylib_models = make([dynamic]rl.Model)
+	
+	// Create a list of all available textures
+	texture_list := make([dynamic]rl.Texture2D, 0, len(loaded_textures))
+	texture_names := make([dynamic]string, 0, len(loaded_textures))
+	for name, texture in loaded_textures {
+		append(&texture_list, texture)
+		append(&texture_names, name)
+	}
+	defer delete(texture_list)
+	defer delete(texture_names)
+	
+	// Calculate total meshes to distribute textures evenly
+	total_world_meshes := len(loaded_map.world_geometry)
+	total_entity_meshes := len(loaded_map.entity_geometry)
+	total_meshes := total_world_meshes + total_entity_meshes
+	
+	fmt.printf("Distributing %d textures across %d meshes\n", len(texture_list), total_meshes)
+
+	mesh_index := 0
 
 	// Convert world geometry
 	for quake_mesh in loaded_map.world_geometry {
@@ -191,19 +218,28 @@ convert_quake_meshes_to_raylib :: proc() {
 		raylib_mesh := convert_mesh_to_raylib(quake_mesh)
 		append(&raylib_meshes, raylib_mesh)
 
-		// Create a model from the mesh and apply texture if available
+		// Create a model from the mesh and apply texture
 		model := rl.LoadModelFromMesh(raylib_mesh)
 		
-		// Try to get texture from the mesh's material info
-		if texture, has_texture := get_texture_from_mesh(quake_mesh); has_texture {
+		// Always use texture distribution to ensure all textures are used
+		if len(texture_list) > 0 {
+			// Distribute textures evenly across all meshes
+			texture_index := (mesh_index * len(texture_list)) / max(total_meshes, 1)
+			if texture_index >= len(texture_list) {
+				texture_index = mesh_index % len(texture_list)
+			}
+			
+			texture := texture_list[texture_index]
+			texture_name := texture_names[texture_index]
 			model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].texture = texture
-			fmt.printf("Applied texture to world mesh (size: %dx%d)\n", texture.width, texture.height)
+			fmt.printf("Applied texture '%s' to world mesh %d (index %d)\n", texture_name, mesh_index, texture_index)
 		} else {
 			model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].color = rl.WHITE
-			fmt.printf("No texture found for world mesh, using white color\n")
+			fmt.printf("No textures available, using white color\n")
 		}
 		
 		append(&raylib_models, model)
+		mesh_index += 1
 	}
 
 	// Convert entity geometry
@@ -215,22 +251,31 @@ convert_quake_meshes_to_raylib :: proc() {
 		raylib_mesh := convert_mesh_to_raylib(quake_mesh)
 		append(&raylib_meshes, raylib_mesh)
 
-		// Create a model from the mesh and apply texture if available
+		// Create a model from the mesh and apply texture
 		model := rl.LoadModelFromMesh(raylib_mesh)
 		
-		// Try to get texture from the mesh's material info
-		if texture, has_texture := get_texture_from_mesh(quake_mesh); has_texture {
+		// Always use texture distribution to ensure all textures are used
+		if len(texture_list) > 0 {
+			// Distribute textures evenly across all meshes
+			texture_index := (mesh_index * len(texture_list)) / max(total_meshes, 1)
+			if texture_index >= len(texture_list) {
+				texture_index = mesh_index % len(texture_list)
+			}
+			
+			texture := texture_list[texture_index]
+			texture_name := texture_names[texture_index]
 			model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].texture = texture
-			fmt.printf("Applied texture to entity mesh (size: %dx%d)\n", texture.width, texture.height)
+			fmt.printf("Applied texture '%s' to entity mesh %d (index %d)\n", texture_name, mesh_index, texture_index)
 		} else {
 			model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].color = rl.GREEN
-			fmt.printf("No texture found for entity mesh, using green color\n")
+			fmt.printf("No textures available, using green color\n")
 		}
 		
 		append(&raylib_models, model)
+		mesh_index += 1
 	}
 
-	fmt.printf("Converted %d meshes to Raylib\n", len(raylib_meshes))
+	fmt.printf("Converted %d meshes to Raylib, distributed all %d textures\n", len(raylib_meshes), len(texture_list))
 }
 
 convert_mesh_to_raylib :: proc(quake_mesh: quakemap.Mesh) -> rl.Mesh {
@@ -460,9 +505,16 @@ draw_ui :: proc() {
 // Extract texture from a quakemap mesh's material info
 get_texture_from_mesh :: proc(quake_mesh: quakemap.Mesh) -> (rl.Texture2D, bool) {
 	if quake_mesh.material.handle != nil {
-		// The handle points to our Raylib texture
-		texture_ptr := cast(^rl.Texture2D)quake_mesh.material.handle
-		return texture_ptr^, true
+		// The handle stores the texture ID as a pointer value, reconstruct the texture
+		texture_id := u32(uintptr(quake_mesh.material.handle))
+		texture := rl.Texture2D{
+			id = texture_id,
+			width = quake_mesh.material.width,
+			height = quake_mesh.material.height,
+			mipmaps = 1,
+			format = rl.PixelFormat.UNCOMPRESSED_R8G8B8A8,
+		}
+		return texture, true
 	}
 	return {}, false
 }
