@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:math"
 import "core:math/linalg"
 import "core:os"
+import "core:slice"
 import "core:strings"
 import rl "vendor:raylib"
 
@@ -20,6 +21,8 @@ loaded_map: quakemap.LoadedMap
 raylib_meshes: [dynamic]rl.Mesh
 raylib_models: [dynamic]rl.Model
 loaded_textures: map[string]rl.Texture2D  // Map texture names to loaded textures
+sorted_texture_names: [dynamic]string  // Deterministic order of texture names
+material_handle_to_name: map[rawptr]string  // Map material handles to their names
 camera: rl.Camera3D
 camera_yaw: f32
 camera_pitch: f32
@@ -38,6 +41,7 @@ main :: proc() {
 
 	// Load textures after Raylib is initialized
 	load_textures()
+	defer delete(sorted_texture_names)
 	populate_loader_materials(&loader)
 
 	// Load the TrenchBroom generated map
@@ -128,6 +132,7 @@ setup_camera :: proc() {
 load_textures :: proc() {
 	fmt.println("DEBUG: Starting load_textures")
 	loaded_textures = make(map[string]rl.Texture2D)
+	sorted_texture_names = make([dynamic]string)
 	
 	// Load all texture files from textures directory
 	texture_dir := "textures"
@@ -148,32 +153,47 @@ load_textures :: proc() {
 	defer delete(file_infos)
 	fmt.printf("DEBUG: Found %d files in directory\n", len(file_infos))
 	
+	// Collect PNG files and sort them for consistent ordering
+	png_files := make([dynamic]string)
+	defer delete(png_files)
+	
 	for file_info in file_infos {
-		fmt.printf("DEBUG: Processing file: %s\n", file_info.name)
 		if strings.has_suffix(file_info.name, ".png") {
-			texture_name := strings.trim_suffix(file_info.name, ".png")
-			texture_path := fmt.tprintf("%s/%s", texture_dir, file_info.name)
-			fmt.printf("DEBUG: Loading texture: %s from %s\n", texture_name, texture_path)
-			
-			// Convert to cstring for raylib
-			texture_path_cstr := strings.clone_to_cstring(texture_path, context.temp_allocator)
-			fmt.printf("DEBUG: About to call rl.LoadTexture\n")
-			
-			texture := rl.LoadTexture(texture_path_cstr)
-			fmt.printf("DEBUG: rl.LoadTexture returned, texture.id = %d\n", texture.id)
-			if texture.id != 0 {
-				loaded_textures[strings.clone(texture_name)] = texture
-				fmt.printf("Loaded texture: %s\n", texture_name)
-			} else {
-				fmt.printf("Failed to load texture: %s\n", texture_path)
-			}
+			append(&png_files, file_info.name)
 		}
 	}
 	
-	fmt.printf("Loaded %d textures\n", len(loaded_textures))
+	// Sort the PNG files for deterministic order
+	slice.sort(png_files[:])
+	
+	for file_name in png_files {
+		fmt.printf("DEBUG: Processing file: %s\n", file_name)
+		texture_name := strings.trim_suffix(file_name, ".png")
+		texture_path := fmt.tprintf("%s/%s", texture_dir, file_name)
+		fmt.printf("DEBUG: Loading texture: %s from %s\n", texture_name, texture_path)
+		
+		// Convert to cstring for raylib
+		texture_path_cstr := strings.clone_to_cstring(texture_path, context.temp_allocator)
+		fmt.printf("DEBUG: About to call rl.LoadTexture\n")
+		
+		texture := rl.LoadTexture(texture_path_cstr)
+		fmt.printf("DEBUG: rl.LoadTexture returned, texture.id = %d\n", texture.id)
+		if texture.id != 0 {
+			loaded_textures[strings.clone(texture_name)] = texture
+			append(&sorted_texture_names, strings.clone(texture_name))
+			fmt.printf("Loaded texture: %s\n", texture_name)
+		} else {
+			fmt.printf("Failed to load texture: %s\n", texture_path)
+		}
+	}
+	
+	fmt.printf("Loaded %d textures in sorted order\n", len(loaded_textures))
 }
 
 populate_loader_materials :: proc(loader: ^quakemap.MapLoader) {
+	// Initialize the handle-to-name mapping
+	material_handle_to_name = make(map[rawptr]string)
+	
 	// Populate the loader's materials map with our loaded textures
 	for texture_name, texture in loaded_textures {
 		material_info := quakemap.MaterialInfo {
@@ -181,7 +201,11 @@ populate_loader_materials :: proc(loader: ^quakemap.MapLoader) {
 			width = i32(texture.width),
 			height = i32(texture.height),
 		}
-		loader.materials[strings.clone(texture_name)] = material_info  
+		loader.materials[strings.clone(texture_name)] = material_info
+		
+		// Store the handle-to-name mapping
+		material_handle_to_name[material_info.handle] = strings.clone(texture_name)
+		
 		fmt.printf("Registered material: %s (%dx%d)\n", texture_name, texture.width, texture.height)
 	}
 }
@@ -189,25 +213,22 @@ populate_loader_materials :: proc(loader: ^quakemap.MapLoader) {
 convert_quake_meshes_to_raylib :: proc() {
 	raylib_meshes = make([dynamic]rl.Mesh)
 	raylib_models = make([dynamic]rl.Model)
-	
-	// Create a list of all available textures
-	texture_list := make([dynamic]rl.Texture2D, 0, len(loaded_textures))
-	texture_names := make([dynamic]string, 0, len(loaded_textures))
-	for name, texture in loaded_textures {
+
+	// Use the pre-sorted texture names for consistent lookup
+	texture_list := make([dynamic]rl.Texture2D, 0, len(sorted_texture_names))
+	for name in sorted_texture_names {
+		texture := loaded_textures[name]
 		append(&texture_list, texture)
-		append(&texture_names, name)
 	}
 	defer delete(texture_list)
-	defer delete(texture_names)
-	
-	// Calculate total meshes to distribute textures evenly
-	total_world_meshes := len(loaded_map.world_geometry)
-	total_entity_meshes := len(loaded_map.entity_geometry)
-	total_meshes := total_world_meshes + total_entity_meshes
-	
-	fmt.printf("Distributing %d textures across %d meshes\n", len(texture_list), total_meshes)
 
-	mesh_index := 0
+	// Fallback texture if material not found
+	fallback_texture: rl.Texture2D
+	fallback_texture_set := false
+	if len(texture_list) > 0 {
+		fallback_texture = texture_list[0]
+		fallback_texture_set = true
+	}
 
 	// Convert world geometry
 	for quake_mesh in loaded_map.world_geometry {
@@ -218,28 +239,23 @@ convert_quake_meshes_to_raylib :: proc() {
 		raylib_mesh := convert_mesh_to_raylib(quake_mesh)
 		append(&raylib_meshes, raylib_mesh)
 
-		// Create a model from the mesh and apply texture
 		model := rl.LoadModelFromMesh(raylib_mesh)
-		
-		// Always use texture distribution to ensure all textures are used
-		if len(texture_list) > 0 {
-			// Distribute textures evenly across all meshes
-			texture_index := (mesh_index * len(texture_list)) / max(total_meshes, 1)
-			if texture_index >= len(texture_list) {
-				texture_index = mesh_index % len(texture_list)
+
+		if material_name, has_material := get_material_name_from_mesh(quake_mesh); has_material {
+			if texture, found := get_texture_by_name(material_name); found {
+				model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].texture = texture
+			} else if fallback_texture_set {
+				model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].texture = fallback_texture
+			} else {
+				model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].color = rl.WHITE
 			}
-			
-			texture := texture_list[texture_index]
-			texture_name := texture_names[texture_index]
-			model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].texture = texture
-			fmt.printf("Applied texture '%s' to world mesh %d (index %d)\n", texture_name, mesh_index, texture_index)
+		} else if fallback_texture_set {
+			model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].texture = fallback_texture
 		} else {
 			model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].color = rl.WHITE
-			fmt.printf("No textures available, using white color\n")
 		}
-		
+
 		append(&raylib_models, model)
-		mesh_index += 1
 	}
 
 	// Convert entity geometry
@@ -251,31 +267,24 @@ convert_quake_meshes_to_raylib :: proc() {
 		raylib_mesh := convert_mesh_to_raylib(quake_mesh)
 		append(&raylib_meshes, raylib_mesh)
 
-		// Create a model from the mesh and apply texture
 		model := rl.LoadModelFromMesh(raylib_mesh)
-		
-		// Always use texture distribution to ensure all textures are used
-		if len(texture_list) > 0 {
-			// Distribute textures evenly across all meshes
-			texture_index := (mesh_index * len(texture_list)) / max(total_meshes, 1)
-			if texture_index >= len(texture_list) {
-				texture_index = mesh_index % len(texture_list)
+
+		if material_name, has_material := get_material_name_from_mesh(quake_mesh); has_material {
+			if texture, found := get_texture_by_name(material_name); found {
+				model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].texture = texture
+			} else if fallback_texture_set {
+				model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].texture = fallback_texture
+			} else {
+				model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].color = rl.GREEN
 			}
-			
-			texture := texture_list[texture_index]
-			texture_name := texture_names[texture_index]
-			model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].texture = texture
-			fmt.printf("Applied texture '%s' to entity mesh %d (index %d)\n", texture_name, mesh_index, texture_index)
+		} else if fallback_texture_set {
+			model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].texture = fallback_texture
 		} else {
 			model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].color = rl.GREEN
-			fmt.printf("No textures available, using green color\n")
 		}
-		
-		append(&raylib_models, model)
-		mesh_index += 1
-	}
 
-	fmt.printf("Converted %d meshes to Raylib, distributed all %d textures\n", len(raylib_meshes), len(texture_list))
+		append(&raylib_models, model)
+	}
 }
 
 convert_mesh_to_raylib :: proc(quake_mesh: quakemap.Mesh) -> rl.Mesh {
@@ -502,18 +511,24 @@ draw_ui :: proc() {
 	rl.DrawLine(center_x, center_y - 10, center_x, center_y + 10, rl.WHITE)
 }
 
-// Extract texture from a quakemap mesh's material info
-get_texture_from_mesh :: proc(quake_mesh: quakemap.Mesh) -> (rl.Texture2D, bool) {
+// Extract material name from a quakemap mesh
+get_material_name_from_mesh :: proc(quake_mesh: quakemap.Mesh) -> (string, bool) {
 	if quake_mesh.material.handle != nil {
-		// The handle stores the texture ID as a pointer value, reconstruct the texture
-		texture_id := u32(uintptr(quake_mesh.material.handle))
-		texture := rl.Texture2D{
-			id = texture_id,
-			width = quake_mesh.material.width,
-			height = quake_mesh.material.height,
-			mipmaps = 1,
-			format = rl.PixelFormat.UNCOMPRESSED_R8G8B8A8,
+		if material_name, found := material_handle_to_name[quake_mesh.material.handle]; found {
+			fmt.printf("DEBUG: Material name found via handle: '%s'\n", material_name)
+			return material_name, true
+		} else {
+			fmt.printf("DEBUG: Material handle %p not found in mapping\n", quake_mesh.material.handle)
 		}
+	} else {
+		fmt.printf("DEBUG: No material handle in mesh\n")
+	}
+	return "", false
+}
+
+// Get texture by name from loaded textures
+get_texture_by_name :: proc(texture_name: string) -> (rl.Texture2D, bool) {
+	if texture, found := loaded_textures[texture_name]; found {
 		return texture, true
 	}
 	return {}, false
