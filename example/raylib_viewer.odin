@@ -236,7 +236,11 @@ convert_quake_meshes_to_raylib :: proc() {
 			continue
 		}
 
-		raylib_mesh := convert_mesh_to_raylib(quake_mesh)
+		raylib_mesh, err := convert_mesh_to_raylib(quake_mesh)
+		if err != .None {
+			fmt.printf("Skipping mesh due to conversion error: %v\n", err)
+			continue
+		}
 		append(&raylib_meshes, raylib_mesh)
 
 		model := rl.LoadModelFromMesh(raylib_mesh)
@@ -264,7 +268,11 @@ convert_quake_meshes_to_raylib :: proc() {
 			continue
 		}
 
-		raylib_mesh := convert_mesh_to_raylib(quake_mesh)
+		raylib_mesh, err := convert_mesh_to_raylib(quake_mesh)
+		if err != .None {
+			fmt.printf("Skipping mesh due to conversion error: %v\n", err)
+			continue
+		}
 		append(&raylib_meshes, raylib_mesh)
 
 		model := rl.LoadModelFromMesh(raylib_mesh)
@@ -287,11 +295,21 @@ convert_quake_meshes_to_raylib :: proc() {
 	}
 }
 
-convert_mesh_to_raylib :: proc(quake_mesh: quakemap.Mesh) -> rl.Mesh {
+ConvertMeshError :: enum {
+	None,
+	InvalidInput,
+	AllocFailed,
+}
+
+convert_mesh_to_raylib :: proc(quake_mesh: quakemap.Mesh) -> (rl.Mesh, ConvertMeshError) {
 	mesh := rl.Mesh{}
 
 	vertex_count := i32(len(quake_mesh.vertices))
 	triangle_count := i32(len(quake_mesh.indices) / 3)
+
+	if vertex_count == 0 || triangle_count == 0 {
+		return rl.Mesh{}, .InvalidInput
+	}
 
 	mesh.vertexCount = vertex_count
 	mesh.triangleCount = triangle_count
@@ -302,6 +320,16 @@ convert_mesh_to_raylib :: proc(quake_mesh: quakemap.Mesh) -> rl.Mesh {
 	mesh.texcoords = cast(^f32)rl.MemAlloc(cast(u32)(vertex_count * 2 * size_of(f32)))
 	mesh.colors = cast(^u8)rl.MemAlloc(cast(u32)(vertex_count * 4 * size_of(u8)))
 	mesh.indices = cast(^u16)rl.MemAlloc(cast(u32)(len(quake_mesh.indices) * size_of(u16)))
+
+	if mesh.vertices == nil || mesh.normals == nil || mesh.texcoords == nil || mesh.colors == nil || mesh.indices == nil {
+		// Free any allocated memory
+		if mesh.vertices != nil do rl.MemFree(mesh.vertices)
+		if mesh.normals != nil do rl.MemFree(mesh.normals)
+		if mesh.texcoords != nil do rl.MemFree(mesh.texcoords)
+		if mesh.colors != nil do rl.MemFree(mesh.colors)
+		if mesh.indices != nil do rl.MemFree(mesh.indices)
+		return rl.Mesh{}, .AllocFailed
+	}
 
 	// Convert vertices
 	vertices_slice := ([^]f32)(mesh.vertices)[:vertex_count * 3]
@@ -341,8 +369,7 @@ convert_mesh_to_raylib :: proc(quake_mesh: quakemap.Mesh) -> rl.Mesh {
 
 	// Upload mesh data to GPU
 	rl.UploadMesh(&mesh, false)
-
-	return mesh
+	return mesh, .None
 }
 
 cleanup_raylib_meshes :: proc() {
