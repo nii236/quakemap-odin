@@ -129,7 +129,15 @@ setup_camera :: proc() {
 	camera_pitch = 0.0
 }
 
-load_textures :: proc() {
+LoadTexturesError :: enum {
+	None,
+	OpenDirFailed,
+	ReadDirFailed,
+	NoTexturesFound,
+	TextureLoadFailed,
+}
+
+load_textures :: proc() -> LoadTexturesError {
 	fmt.println("DEBUG: Starting load_textures")
 	loaded_textures = make(map[string]rl.Texture2D)
 	sorted_texture_names = make([dynamic]string)
@@ -140,7 +148,7 @@ load_textures :: proc() {
 	dir_handle, dir_err := os.open(texture_dir)
 	if dir_err != os.ERROR_NONE {
 		fmt.printf("Failed to open textures directory: %v\n", dir_err)
-		return
+		return .OpenDirFailed
 	}
 	defer os.close(dir_handle)
 	fmt.println("DEBUG: Directory opened successfully")
@@ -148,7 +156,7 @@ load_textures :: proc() {
 	file_infos, read_err := os.read_dir(dir_handle, -1)
 	if read_err != os.ERROR_NONE {
 		fmt.printf("Failed to read textures directory: %v\n", read_err)
-		return
+		return .ReadDirFailed
 	}
 	defer delete(file_infos)
 	fmt.printf("DEBUG: Found %d files in directory\n", len(file_infos))
@@ -163,19 +171,22 @@ load_textures :: proc() {
 		}
 	}
 	
+	if len(png_files) == 0 {
+		fmt.printf("No PNG textures found in directory\n")
+		return .NoTexturesFound
+	}
+
 	// Sort the PNG files for deterministic order
 	slice.sort(png_files[:])
 	
+	any_failed := false
 	for file_name in png_files {
 		fmt.printf("DEBUG: Processing file: %s\n", file_name)
 		texture_name := strings.trim_suffix(file_name, ".png")
 		texture_path := fmt.tprintf("%s/%s", texture_dir, file_name)
 		fmt.printf("DEBUG: Loading texture: %s from %s\n", texture_name, texture_path)
-		
-		// Convert to cstring for raylib
 		texture_path_cstr := strings.clone_to_cstring(texture_path, context.temp_allocator)
 		fmt.printf("DEBUG: About to call rl.LoadTexture\n")
-		
 		texture := rl.LoadTexture(texture_path_cstr)
 		fmt.printf("DEBUG: rl.LoadTexture returned, texture.id = %d\n", texture.id)
 		if texture.id != 0 {
@@ -184,10 +195,15 @@ load_textures :: proc() {
 			fmt.printf("Loaded texture: %s\n", texture_name)
 		} else {
 			fmt.printf("Failed to load texture: %s\n", texture_path)
+			any_failed = true
 		}
 	}
 	
 	fmt.printf("Loaded %d textures in sorted order\n", len(loaded_textures))
+	if any_failed {
+		return .TextureLoadFailed
+	}
+	return .None
 }
 
 populate_loader_materials :: proc(loader: ^quakemap.MapLoader) {
@@ -478,6 +494,11 @@ draw_ui :: proc() {
 	// Draw crosshair
 	rl.DrawLine(center_x - 10, center_y, center_x + 10, center_y, rl.WHITE)
 	rl.DrawLine(center_x, center_y - 10, center_x, center_y + 10, rl.WHITE)
+
+	// Draw FPS counter in top-left corner
+	fps := rl.GetFPS()
+	fps_text := fmt.tprintf("FPS: %d", fps)
+	rl.DrawText(strings.clone_to_cstring(fps_text, context.temp_allocator), 10, 10, 20, rl.YELLOW)
 }
 
 // Extract material name from a quakemap mesh
