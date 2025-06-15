@@ -99,6 +99,12 @@ setup_camera :: proc() {
 	// Try to find a spawn point for initial camera position
 	initial_pos := rl.Vector3{0, 10, 0}
 
+	// Check for invalid loaded_map (no geometry and no spawn points)
+	if len(loaded_map.spawn_points) == 0 && len(loaded_map.world_geometry) == 0 {
+		fmt.eprintln("Error: loaded_map is invalid (no spawn points or geometry)")
+		os.exit(1)
+	}
+
 	if len(loaded_map.spawn_points) > 0 {
 		spawn := loaded_map.spawn_points[0]
 		// Convert Quake coordinates (X,Y,Z) to Raylib coordinates (X,Z,-Y)
