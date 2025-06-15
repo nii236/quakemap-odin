@@ -65,7 +65,7 @@ main :: proc() {
 	setup_camera()
 
 	// Convert quake meshes to Raylib meshes
-	if err := convert_quake_meshes_to_raylib(); err != .None {
+	if err := build_raylib_models_from_map(); err != .None {
 		fmt.printf("Error converting quake meshes to Raylib: %v\n", err)
 		os.exit(1)
 	}
@@ -229,12 +229,12 @@ populate_loader_materials :: proc(loader: ^quakemap.MapLoader) {
 	}
 }
 
-ConvertMeshesError :: enum {
+BuildRaylibModelsError :: enum {
 	None,
 	MeshConversionFailed,
 }
 
-convert_quake_meshes_to_raylib :: proc() -> ConvertMeshesError {
+build_raylib_models_from_map :: proc() -> BuildRaylibModelsError {
 	raylib_meshes = make([dynamic]rl.Mesh)
 	raylib_models = make([dynamic]rl.Model)
 
@@ -260,7 +260,7 @@ convert_quake_meshes_to_raylib :: proc() -> ConvertMeshesError {
 			continue
 		}
 
-		raylib_mesh, err := convert_mesh_to_raylib(quake_mesh)
+		raylib_mesh, err := build_raylib_mesh_from_quakemap(quake_mesh)
 		if err != .None {
 			fmt.printf("Skipping mesh due to conversion error: %v\n", err)
 			any_failed = true
@@ -271,8 +271,9 @@ convert_quake_meshes_to_raylib :: proc() -> ConvertMeshesError {
 
 		model := rl.LoadModelFromMesh(raylib_mesh)
 
-		if material_name, has_material := get_material_name_from_mesh(quake_mesh); has_material {
-			if texture, found := get_texture_by_name(material_name); found {
+		if material_name, mat_err := get_material_name_from_mesh(quake_mesh); mat_err == .None {
+			texture, tex_err := get_texture_by_name(material_name)
+			if tex_err == .None {
 				model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].texture = texture
 			} else if fallback_texture_set {
 				model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].texture = fallback_texture
@@ -294,7 +295,7 @@ convert_quake_meshes_to_raylib :: proc() -> ConvertMeshesError {
 			continue
 		}
 
-		raylib_mesh, err := convert_mesh_to_raylib(quake_mesh)
+		raylib_mesh, err := build_raylib_mesh_from_quakemap(quake_mesh)
 		if err != .None {
 			fmt.printf("Skipping mesh due to conversion error: %v\n", err)
 			any_failed = true
@@ -305,8 +306,9 @@ convert_quake_meshes_to_raylib :: proc() -> ConvertMeshesError {
 
 		model := rl.LoadModelFromMesh(raylib_mesh)
 
-		if material_name, has_material := get_material_name_from_mesh(quake_mesh); has_material {
-			if texture, found := get_texture_by_name(material_name); found {
+		if material_name, mat_err := get_material_name_from_mesh(quake_mesh); mat_err == .None {
+			texture, tex_err := get_texture_by_name(material_name)
+			if tex_err == .None {
 				model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].texture = texture
 			} else if fallback_texture_set {
 				model.materials[0].maps[rl.MaterialMapIndex.ALBEDO].texture = fallback_texture
@@ -328,13 +330,13 @@ convert_quake_meshes_to_raylib :: proc() -> ConvertMeshesError {
 	return .None
 }
 
-ConvertMeshError :: enum {
+BuildRaylibMeshError :: enum {
 	None,
 	InvalidInput,
 	AllocFailed,
 }
 
-convert_mesh_to_raylib :: proc(quake_mesh: quakemap.Mesh) -> (rl.Mesh, ConvertMeshError) {
+build_raylib_mesh_from_quakemap :: proc(quake_mesh: quakemap.Mesh) -> (rl.Mesh, BuildRaylibMeshError) {
 	mesh := rl.Mesh{}
 
 	vertex_count := i32(len(quake_mesh.vertices))
@@ -516,25 +518,37 @@ draw_ui :: proc() {
 	rl.DrawText(strings.clone_to_cstring(fps_text, context.temp_allocator), 10, 10, 20, rl.YELLOW)
 }
 
+GetMaterialNameError :: enum {
+	None,
+	NoHandle,
+	NotFound,
+}
+
 // Extract material name from a quakemap mesh
-get_material_name_from_mesh :: proc(quake_mesh: quakemap.Mesh) -> (string, bool) {
+get_material_name_from_mesh :: proc(quake_mesh: quakemap.Mesh) -> (string, GetMaterialNameError) {
 	if quake_mesh.material.handle != nil {
 		if material_name, found := material_handle_to_name[quake_mesh.material.handle]; found {
 			fmt.printf("DEBUG: Material name found via handle: '%s'\n", material_name)
-			return material_name, true
+			return material_name, .None
 		} else {
 			fmt.printf("DEBUG: Material handle %p not found in mapping\n", quake_mesh.material.handle)
+			return "", .NotFound
 		}
 	} else {
 		fmt.printf("DEBUG: No material handle in mesh\n")
+		return "", .NoHandle
 	}
-	return "", false
+}
+
+GetTextureByNameError :: enum {
+	None,
+	NotFound,
 }
 
 // Get texture by name from loaded textures
-get_texture_by_name :: proc(texture_name: string) -> (rl.Texture2D, bool) {
+get_texture_by_name :: proc(texture_name: string) -> (rl.Texture2D, GetTextureByNameError) {
 	if texture, found := loaded_textures[texture_name]; found {
-		return texture, true
+		return texture, .None
 	}
-	return {}, false
+	return {}, .NotFound
 }
