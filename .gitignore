@@ -296,3 +296,4 @@ build.sh
 *.rdi
 tests/issues/build/*
 misc/featuregen/featuregen
+example/raylib_viewer
