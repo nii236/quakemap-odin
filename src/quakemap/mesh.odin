@@ -1,6 +1,5 @@
 package quakemap
 
-import "core:math"
 import "core:math/linalg"
 
 @(private)
@@ -38,7 +37,7 @@ build_meshes_for_entity :: proc(
 	// Group faces by material
 	material_faces := make(map[string][dynamic]Face, allocator)
 	defer {
-		for key, faces in material_faces {
+		for _, faces in material_faces {
 			delete(faces)
 		}
 		delete(material_faces)

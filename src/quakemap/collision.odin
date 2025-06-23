@@ -28,7 +28,6 @@ find_floor_height :: proc(
 	height: f32,
 	found: bool,
 ) {
-	test_point := Vec3{x, 0, z}
 	highest_floor := f32(-math.F32_MAX)
 	found_floor := false
 

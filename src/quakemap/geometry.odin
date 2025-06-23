@@ -2,7 +2,6 @@ package quakemap
 
 import "core:math"
 import "core:math/linalg"
-import "core:mem"
 
 @(private)
 plane_from_points :: proc(v0, v1, v2: Vec3) -> Plane {

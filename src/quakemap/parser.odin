@@ -1,6 +1,5 @@
 package quakemap
 
-import "core:mem"
 import "core:strconv"
 import "core:strings"
 
