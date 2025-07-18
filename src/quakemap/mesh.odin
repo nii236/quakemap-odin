@@ -1,6 +1,7 @@
 package quakemap
 
 import "core:math/linalg"
+import "core:strings"
 
 @(private)
 build_world_meshes :: proc(
@@ -35,30 +36,48 @@ build_meshes_for_entity :: proc(
 	allocator := context.allocator,
 ) -> []Mesh {
 	// Group faces by material
-	material_faces := make(map[string][dynamic]Face, allocator)
+	texture_face_mapping := make(map[string][dynamic]Face, allocator)
 	defer {
-		for _, faces in material_faces {
+		for _, faces in texture_face_mapping {
 			delete(faces)
 		}
-		delete(material_faces)
+		delete(texture_face_mapping)
 	}
 
 	for solid in entity.solids {
 		for face in solid.faces {
-			if face.texture_name not_in material_faces {
-				material_faces[face.texture_name] = make([dynamic]Face, allocator)
+			if face.texture_name not_in texture_face_mapping {
+				texture_face_mapping[face.texture_name] = make([dynamic]Face, allocator)
 			}
-			append(&material_faces[face.texture_name], face)
+			append(&texture_face_mapping[face.texture_name], face)
 		}
 	}
 
 	// Build a mesh for each material
 	meshes := make([dynamic]Mesh, allocator)
 
-	for material_name, faces in material_faces {
+	for material_name, faces in texture_face_mapping {
 		if len(faces) == 0 do continue
-
-		mesh := build_mesh_from_faces(faces[:], material_name, materials, allocator)
+		
+		// Handle special case for map editor placeholder material
+		actual_material_name := material_name
+		if material_name == "__TB_empty" {
+			actual_material_name = "checkboard"
+		}
+		
+		material, exists := materials[actual_material_name]
+		if !exists {
+			// Create a basic material if none exists
+			material = MaterialInfo{
+				name = actual_material_name,
+				width = 64,  // Default texture size
+				height = 64,
+			}
+		}
+		// Ensure the material name is always set - create a copy so we can modify it
+		material_copy := material
+		material_copy.name = strings.clone(actual_material_name, allocator)
+		mesh := build_mesh_from_faces(faces[:], material_copy, allocator)
 		append(&meshes, mesh)
 	}
 
@@ -68,8 +87,7 @@ build_meshes_for_entity :: proc(
 @(private)
 build_mesh_from_faces :: proc(
 	faces: []Face,
-	material_name: string,
-	materials: ^map[string]MaterialInfo,
+	material: MaterialInfo,
 	allocator := context.allocator,
 ) -> Mesh {
 	vertices := make([dynamic]Vertex, allocator)
@@ -86,8 +104,7 @@ build_mesh_from_faces :: proc(
 		}
 
 		// Get material info for UV scaling
-		material_info := materials[material_name] or_else MaterialInfo{width = 32, height = 32}
-		tex_scale := Vec3{1.0 / f32(material_info.width), 1.0 / f32(material_info.height), 1.0}
+		tex_scale := Vec3{1.0 / f32(material.width), 1.0 / f32(material.height), 1.0}
 
 		// Calculate UV coordinates for each vertex
 		face_vertices := make([]Vertex, len(face.vertices), context.temp_allocator)
@@ -123,13 +140,7 @@ build_mesh_from_faces :: proc(
 
 	// Calculate mesh bounds
 	bounds := calculate_mesh_bounds(vertices[:])
-
-	return Mesh {
-		vertices = vertices[:],
-		indices = indices[:],
-		material = materials[material_name] or_else MaterialInfo{},
-		bounds = bounds,
-	}
+	return Mesh{vertices = vertices[:], indices = indices[:], material = material, bounds = bounds}
 }
 
 @(private)

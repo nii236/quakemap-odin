@@ -20,9 +20,9 @@ MAP_SCALE :: f32(0.1)
 loaded_map: quakemap.LoadedMap
 raylib_meshes: [dynamic]rl.Mesh
 raylib_models: [dynamic]rl.Model
-loaded_textures: map[string]rl.Texture2D  // Map texture names to loaded textures
-sorted_texture_names: [dynamic]string  // Deterministic order of texture names
-material_handle_to_name: map[rawptr]string  // Map material handles to their names
+loaded_textures: map[string]rl.Texture2D // Map texture names to loaded textures
+sorted_texture_names: [dynamic]string // Deterministic order of texture names
+material_handle_to_name: map[rawptr]string // Map material handles to their names
 camera: rl.Camera3D
 camera_yaw: f32
 camera_pitch: f32
@@ -45,7 +45,7 @@ main :: proc() {
 	populate_loader_materials(&loader)
 
 	// Load the TrenchBroom generated map
-	map_file := "test_empty.map"
+	map_file := "./example/test_empty.map"
 	fmt.printf("Loading map file: %s\n", map_file)
 
 	map_result, parse_err := quakemap.load_map_from_file(&loader, map_file)
@@ -150,7 +150,7 @@ load_textures :: proc() -> LoadTexturesError {
 	fmt.println("DEBUG: Starting load_textures")
 	loaded_textures = make(map[string]rl.Texture2D)
 	sorted_texture_names = make([dynamic]string)
-	
+
 	// Load all texture files from textures directory
 	texture_dir := "textures"
 	fmt.printf("DEBUG: Opening texture directory: %s\n", texture_dir)
@@ -161,7 +161,7 @@ load_textures :: proc() -> LoadTexturesError {
 	}
 	defer os.close(dir_handle)
 	fmt.println("DEBUG: Directory opened successfully")
-	
+
 	file_infos, read_err := os.read_dir(dir_handle, -1)
 	if read_err != os.ERROR_NONE {
 		fmt.printf("Failed to read textures directory: %v\n", read_err)
@@ -169,17 +169,17 @@ load_textures :: proc() -> LoadTexturesError {
 	}
 	defer delete(file_infos)
 	fmt.printf("DEBUG: Found %d files in directory\n", len(file_infos))
-	
+
 	// Collect PNG files and sort them for consistent ordering
 	png_files := make([dynamic]string)
 	defer delete(png_files)
-	
+
 	for file_info in file_infos {
 		if strings.has_suffix(file_info.name, ".png") {
 			append(&png_files, file_info.name)
 		}
 	}
-	
+
 	if len(png_files) == 0 {
 		fmt.printf("No PNG textures found in directory\n")
 		return .NoTexturesFound
@@ -187,7 +187,7 @@ load_textures :: proc() -> LoadTexturesError {
 
 	// Sort the PNG files for deterministic order
 	slice.sort(png_files[:])
-	
+
 	any_failed := false
 	for file_name in png_files {
 		fmt.printf("DEBUG: Processing file: %s\n", file_name)
@@ -207,7 +207,7 @@ load_textures :: proc() -> LoadTexturesError {
 			any_failed = true
 		}
 	}
-	
+
 	fmt.printf("Loaded %d textures in sorted order\n", len(loaded_textures))
 	if any_failed {
 		return .TextureLoadFailed
@@ -218,20 +218,25 @@ load_textures :: proc() -> LoadTexturesError {
 populate_loader_materials :: proc(loader: ^quakemap.MapLoader) {
 	// Initialize the handle-to-name mapping
 	material_handle_to_name = make(map[rawptr]string)
-	
+
 	// Populate the loader's materials map with our loaded textures
 	for texture_name, texture in loaded_textures {
 		material_info := quakemap.MaterialInfo {
 			handle = rawptr(uintptr(texture.id)), // Store texture ID as pointer value
-			width = i32(texture.width),
+			width  = i32(texture.width),
 			height = i32(texture.height),
 		}
 		loader.materials[strings.clone(texture_name)] = material_info
-		
+
 		// Store the handle-to-name mapping
 		material_handle_to_name[material_info.handle] = strings.clone(texture_name)
-		
-		fmt.printf("Registered material: %s (%dx%d)\n", texture_name, texture.width, texture.height)
+
+		fmt.printf(
+			"Registered material: %s (%dx%d)\n",
+			texture_name,
+			texture.width,
+			texture.height,
+		)
 	}
 }
 
@@ -342,7 +347,12 @@ BuildRaylibMeshError :: enum {
 	AllocFailed,
 }
 
-build_raylib_mesh_from_quakemap :: proc(quake_mesh: quakemap.Mesh) -> (rl.Mesh, BuildRaylibMeshError) {
+build_raylib_mesh_from_quakemap :: proc(
+	quake_mesh: quakemap.Mesh,
+) -> (
+	rl.Mesh,
+	BuildRaylibMeshError,
+) {
 	mesh := rl.Mesh{}
 
 	vertex_count := i32(len(quake_mesh.vertices))
@@ -362,7 +372,11 @@ build_raylib_mesh_from_quakemap :: proc(quake_mesh: quakemap.Mesh) -> (rl.Mesh, 
 	mesh.colors = cast(^u8)rl.MemAlloc(cast(u32)(vertex_count * 4 * size_of(u8)))
 	mesh.indices = cast(^u16)rl.MemAlloc(cast(u32)(len(quake_mesh.indices) * size_of(u16)))
 
-	if mesh.vertices == nil || mesh.normals == nil || mesh.texcoords == nil || mesh.colors == nil || mesh.indices == nil {
+	if mesh.vertices == nil ||
+	   mesh.normals == nil ||
+	   mesh.texcoords == nil ||
+	   mesh.colors == nil ||
+	   mesh.indices == nil {
 		// Free any allocated memory
 		if mesh.vertices != nil do rl.MemFree(mesh.vertices)
 		if mesh.normals != nil do rl.MemFree(mesh.normals)
@@ -537,7 +551,10 @@ get_material_name_from_mesh :: proc(quake_mesh: quakemap.Mesh) -> (string, GetMa
 			fmt.printf("DEBUG: Material name found via handle: '%s'\n", material_name)
 			return material_name, .None
 		} else {
-			fmt.printf("DEBUG: Material handle %p not found in mapping\n", quake_mesh.material.handle)
+			fmt.printf(
+				"DEBUG: Material handle %p not found in mapping\n",
+				quake_mesh.material.handle,
+			)
 			return "", .NotFound
 		}
 	} else {

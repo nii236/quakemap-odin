@@ -229,9 +229,49 @@ read_solid :: proc(
 	return
 }
 
+// Custom tokenizer that handles quoted strings
+@(private)
+tokenize_face_line :: proc(line: string, allocator := context.allocator) -> []string {
+	tokens := make([dynamic]string, allocator)
+	
+	i := 0
+	for i < len(line) {
+		// Skip whitespace
+		for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+			i += 1
+		}
+		
+		if i >= len(line) {
+			break
+		}
+		
+		// Handle quoted strings
+		if line[i] == '"' {
+			i += 1 // Skip opening quote
+			start := i
+			for i < len(line) && line[i] != '"' {
+				i += 1
+			}
+			if i < len(line) {
+				append(&tokens, line[start:i])
+				i += 1 // Skip closing quote
+			}
+		} else {
+			// Regular token
+			start := i
+			for i < len(line) && line[i] != ' ' && line[i] != '\t' {
+				i += 1
+			}
+			append(&tokens, line[start:i])
+		}
+	}
+	
+	return tokens[:]
+}
+
 @(private)
 read_face :: proc(line: string) -> (face: Face, err: ParseError) {
-	tokens := strings.fields(line, context.temp_allocator)
+	tokens := tokenize_face_line(line, context.temp_allocator)
 	defer delete(tokens, context.temp_allocator)
 
 	if len(tokens) < 21 { 	// Minimum number of tokens expected

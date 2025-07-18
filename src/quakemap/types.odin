@@ -34,6 +34,7 @@ MapLoader :: struct {
 }
 
 MaterialInfo :: struct {
+	name:   string,
 	handle: rawptr,
 	width:  i32,
 	height: i32,

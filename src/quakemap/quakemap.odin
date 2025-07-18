@@ -33,6 +33,7 @@ load_map_from_string :: proc(loader: ^MapLoader, data: string) -> (LoadedMap, Pa
 	if parse_err != .None {
 		return {}, parse_err
 	}
+	defer quake_map_destroy(&quake_map)
 
 	// Build collision data
 	collision_data := build_collision_data(&quake_map, loader.allocator)
@@ -107,7 +108,14 @@ map_destroy :: proc(quake_map: ^LoadedMap) {
 
 	// Clean up spawn points
 	for spawn_point in quake_map.spawn_points {
+		// Free cloned strings in properties
+		for key, value in spawn_point.properties {
+			delete(key)
+			delete(value)
+		}
 		delete(spawn_point.properties)
+		// Free cloned classname
+		delete(spawn_point.classname)
 	}
 	delete(quake_map.spawn_points)
 
@@ -134,13 +142,13 @@ extract_spawn_points :: proc(
 		   strings.contains(entity.classname, "spawn") {
 
 			spawn_point := SpawnPoint {
-				classname  = entity.classname,
+				classname  = strings.clone(entity.classname, allocator),
 				properties = make(map[string]string, allocator),
 			}
 
 			// Copy properties
 			for prop in entity.properties {
-				spawn_point.properties[prop.key] = prop.value
+				spawn_point.properties[strings.clone(prop.key, allocator)] = strings.clone(prop.value, allocator)
 			}
 
 			// Try to get position from "origin" property
