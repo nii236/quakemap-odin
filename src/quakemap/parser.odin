@@ -1,5 +1,6 @@
 package quakemap
 
+import "core:math"
 import "core:strconv"
 import "core:strings"
 
@@ -419,6 +420,32 @@ read_face :: proc(line: string) -> (face: Face, err: ParseError) {
 		face.v_axis = {0, -1, 0}
 	} else {
 		face.v_axis = {0, 0, -1}
+	}
+	
+	// Apply rotation if non-zero
+	if face.rotation != 0 {
+		// Convert rotation to radians (negative because Quake rotates clockwise)
+		angle_rad := -face.rotation * (math.PI / 180.0)
+		cos_angle := f32(math.cos(f64(angle_rad)))
+		sin_angle := f32(math.sin(f64(angle_rad)))
+		
+		// Store original axes
+		original_u := face.u_axis
+		original_v := face.v_axis
+		
+		// Rotate UV axes around the face normal
+		// This performs a proper 3D rotation of the texture axes
+		face.u_axis = Vec3{
+			original_u.x * cos_angle - original_v.x * sin_angle,
+			original_u.y * cos_angle - original_v.y * sin_angle,
+			original_u.z * cos_angle - original_v.z * sin_angle,
+		}
+		
+		face.v_axis = Vec3{
+			original_u.x * sin_angle + original_v.x * cos_angle,
+			original_u.y * sin_angle + original_v.y * cos_angle,
+			original_u.z * sin_angle + original_v.z * cos_angle,
+		}
 	}
 
 	return
